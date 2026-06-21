@@ -1,0 +1,3 @@
+*.copy
+config.h
+patches/
