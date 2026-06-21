@@ -4,7 +4,7 @@
 - Fullscreen toggle (fixed).
 - Window centering (fixed).
 - Mix of mouse and keyboard workflow.
-- Focus with cursor.
+- Focus with the cursor.
 - Rounded corners (added)
 - change display with key-bind
 
@@ -17,24 +17,30 @@
 
 **Window Management**
 
+You can change the keybinding in the `config.de.h`
+
 | combo                      | action                 |
 | -------------------------- | -----------------------|
 | `Mouse`                    | focus under cursor     |
-| `MOD4` + `Left Mouse`      | move window            |
-| `MOD4` + `Right Mouse`     | resize window          |
-| `MOD4` + `f`               | maximize toggle        |
-| `MOD4` + `c`               | center window          |
-| `MOD4` + `Shift` + `c`     | kill window            |
-| `MOD4` + `1-6`             | desktop swap           |
-| `MOD4` + `Shift` +`1-6`    | send window to desktop |
+| `MOD1` + `Left Mouse`      | move window            |
+| `MOD1` + `Right Mouse`     | resize window          |
+| `MOD1` + `f`               | maximize toggle        |
+| `MOD1` + `c`               | center window          |
+| `MOD1` + `Shift` + `c`     | kill window            |
+| `MOD1` + `1-6`             | desktop swap           |
+| `MOD1` + `Shift` +`1-6`    | send window to desktop |
 | `MOD1` + `TAB` (*alt-tab*) | focus cycle            |
-| `MOD4` + `Period`          | Go to next monitor     |
+| `MOD1` + `Shift` + `Left`  | Move the canvas to the Left |
+| `MOD1` + `Shift` + `Right` | Move the canvas to the Right |
+| `MOD1` + `Shift` + `Up`    | Move the canvas to the Up |
+| `MOD1` + `Shift` + `Down`  | Move the canvas to the Down |
+| `Mouse wheel` (Press)      | Move the canvas with the mouse position |
 
 **Programs**
 
 | combo                    | action           | program        |
 | ------------------------ | ---------------- | -------------- |
-| `MOD4` + `Return`        | terminal         | `wezterm`      |
+| `MOD4` + `Return`        | terminal         | `st`           |
 | `MOD4` + `p`             | dmenu            | `dmenu_run`    |
 | `MOD4` + `Shift` + `s`   | scrot            | `scr`          |
 | `XF86_AudioLowerVolume`  | volume down      | `amixer`       |
@@ -43,17 +49,7 @@
 | `XF86_MonBrightnessUp`   | brightness up    | `bri`          |
 | `XF86_MonBrightnessDown` | brightness down  | `bri`          |
 
-
-# DWM (*~~Simple~~ Shitty Opinionated Window Manager*)
-
-- Floating & tiling.
-- Fullscreen toggle.
-- Mix of mouse and keyboard workflow.
-- Focus with cursor.
-- All windows die on exit.
-- No window borders.
-- No EWMH.
-
 ## Dependencies
 
 - `xlib` (*usually `libX11`*).
+- `Xinerama `(By Xlib).
