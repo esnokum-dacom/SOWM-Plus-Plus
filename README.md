@@ -53,3 +53,7 @@ You can change the keybinding in the `config.de.h`
 
 - `xlib` (*usually `libX11`*).
 - `Xinerama `(By Xlib).
+
+# TODO
+- add Zoom functionallity
+- Add title bar in upside the windows
