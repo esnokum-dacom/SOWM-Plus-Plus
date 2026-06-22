@@ -52,7 +52,6 @@ static void (*events[LASTEvent])(XEvent *e) = {
     [ButtonPress]      = button_press,
     [PropertyNotify]   = notify_property,
     [ButtonRelease]    = button_release,
-    [Expose]	       = notify_expose,
     [ConfigureRequest] = configure_request,
     [KeyPress]         = key_press,
     [MapRequest]       = map_request,
@@ -461,15 +460,6 @@ void notify_property(XEvent *e) {
     }
 }
 
-void notify_expose(XEvent *e) {
-    for win {
-	if (e->xexpose.window == c->titlebar) {
-	    titlebar_draw(c);
-	    return;
-	}
-    }
-}
-
 void notify_motion(XEvent *e) {
     while (XCheckTypedEvent(d, MotionNotify, e));
 
@@ -502,7 +492,6 @@ void notify_motion(XEvent *e) {
         }
     } else if (mouse.button == 3) {
         client_resize(cur, MAX(1, ww + xd), MAX(1, wh + yd));
-        win_round_corners(mouse.subwindow, ROUND_CORNERS);
     }
 }
 
@@ -692,8 +681,6 @@ void win_fs(const Arg arg) {
             titlebar_draw(cur);
         }
     }
-
-    win_round_corners(cur->w, cur->f ? 0 : ROUND_CORNERS);
 }
 
 void win_round_corners(Window w, int rad) {
@@ -751,7 +738,6 @@ void configure_request(XEvent *e) {
         titlebar_draw(target);
     }
 
-    win_round_corners(ev->window, ROUND_CORNERS);
 }
 
 void map_request(XEvent *e) {
@@ -771,7 +757,6 @@ void map_request(XEvent *e) {
         cur->cx = (float)sx / z + canvas.pan_x[m];
         cur->cy = (float)sy / z + canvas.pan_y[m];
     }
-    win_round_corners(w, ROUND_CORNERS);
     XMapWindow(d, w);
     win_focus(list->prev);
 }
