@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 199309L
 #include <X11/X.h>
 #include <X11/XF86keysym.h>
 #include <X11/XKBlib.h>
@@ -9,6 +10,7 @@
 #include <X11/extensions/shape.h>
 #include <X11/keysym.h>
 #include <math.h>
+#include <time.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -45,11 +47,12 @@ static int   pan_mon      = 0;
 static int numlock = 0;
 char *client_get_title(Window w);
 
-static Display     *d;
+static Display      *d;
 static XButtonEvent mouse;
 static Window       root;
 static Window       hud_win = 0;
 static Window	    minimap_win[MAX_MONITORS] = {0};
+static Pixmap	    minimap_pix[MAX_MONITORS] = {0};
 static GC	    minimap_gc                = 0;
 
 static Atom net_supported, net_wm_window_type, net_wm_window_type_dock,
@@ -58,6 +61,7 @@ static Atom net_supported, net_wm_window_type, net_wm_window_type_dock,
 
 
 static int strut[4] = {0, 0, 0, 0};
+static long mm_last_update_ms = 0;
 
 int		    minimap		      = 1;
 static int	    minimap_px[MAX_MONITORS]  = {0};
@@ -181,12 +185,15 @@ void minimap_create(void) {
         attr.border_pixel      = 0x444444;
         attr.event_mask        = ExposureMask;
 
-        minimap_win[i] = XCreateWindow(d, root, px, py, pw, ph, 0,
-                                        CopyFromParent, InputOutput, CopyFromParent,
-                                        CWOverrideRedirect | CWBackPixel | CWBorderPixel | CWEventMask,
-                                        &attr);
-        XMapWindow(d, minimap_win[i]);
-        XRaiseWindow(d, minimap_win[i]);
+	minimap_win[i] = XCreateWindow(d, root, px, py, pw, ph, 0,
+                                CopyFromParent, InputOutput, CopyFromParent,
+                                CWOverrideRedirect | CWBackPixel | CWBorderPixel | CWEventMask,
+                                &attr);
+
+	minimap_pix[i] = XCreatePixmap(d, root, pw, ph, DefaultDepth(d, DefaultScreen(d)));
+
+	XMapWindow(d, minimap_win[i]);
+	XRaiseWindow(d, minimap_win[i]);
     }
 
     XFree(info);
@@ -213,6 +220,7 @@ static void minimap_init(Display *dpy) {
 
 static void minimap_draw_one(Window panel, int mon, int mon_w, int mon_h, int mon_x, int mon_y) {
     if (!panel) return;
+    if (mon_w <= 0 || mon_h <= 0) return;
 
     minimap_init(d);
 
@@ -220,14 +228,17 @@ static void minimap_draw_one(Window panel, int mon, int mon_w, int mon_h, int mo
     int mxw, myw;
     win_size(panel, &mxw, &myw, &mw, &mh);
 
+    Pixmap buf = minimap_pix[mon];
+    if (!buf) return;
+
     Visual *visual = DefaultVisual(d, DefaultScreen(d));
     Colormap cmap  = DefaultColormap(d, DefaultScreen(d));
 
     if (mm_draw) XftDrawDestroy(mm_draw);
-    mm_draw = XftDrawCreate(d, panel, visual, cmap);
+    mm_draw = XftDrawCreate(d, buf, visual, cmap);
 
-    XClearWindow(d, panel);
-    XRaiseWindow(d, panel);
+    XSetForeground(d, minimap_gc, 0x111111);
+    XFillRectangle(d, buf, minimap_gc, 0, 0, mw, mh);
 
     float minx =  1e9f, miny =  1e9f;
     float maxx = -1e9f, maxy = -1e9f;
@@ -259,7 +270,7 @@ static void minimap_draw_one(Window panel, int mon, int mon_w, int mon_h, int mo
 #define MM_Y(v) (int)(4 + ((v) - miny) * scale)
 
     XSetForeground(d, minimap_gc, 0x555555);
-    XDrawRectangle(d, panel, minimap_gc,
+    XDrawRectangle(d, buf, minimap_gc,
                     MM_X(vx0), MM_Y(vy0),
                     MAX(1, (int)((vx1 - vx0) * scale)),
                     MAX(1, (int)((vy1 - vy0) * scale)));
@@ -274,7 +285,7 @@ static void minimap_draw_one(Window panel, int mon, int mon_w, int mon_h, int mo
         int rh = MAX(2, (int)(c->height * scale));
 	
         XSetForeground(d, minimap_gc, c == cur ? 0xffffff : 0x505050);
-        XFillRectangle(d, panel, minimap_gc,
+        XFillRectangle(d, buf, minimap_gc,
                         MM_X(c->cx), MM_Y(c->cy), rw, rh);
 
 	char *buf = client_get_title(c->w);;
@@ -291,10 +302,23 @@ static void minimap_draw_one(Window panel, int mon, int mon_w, int mon_h, int mo
 
 #undef MM_X
 #undef MM_Y
+    XCopyArea(d, buf, panel, minimap_gc, 0, 0, mw, mh, 0, 0);
+    XRaiseWindow(d, panel);
     XFlush(d);
 }
 
+static long now_ms(void) {
+    struct timespec t_s;
+    clock_gettime(CLOCK_MONOTONIC, &t_s);
+    return t_s.tv_sec * 1000L + t_s.tv_nsec / 1000000L;
+}
+
 void minimap_update(void) {
+    long t = now_ms();
+    if (t - mm_last_update_ms < 33) return;
+
+    mm_last_update_ms = t;
+
     int n;
     XineramaScreenInfo *info = XineramaQueryScreens(d, &n);
 

@@ -103,6 +103,7 @@ void hud_update(void);
 void minimap_create(void);
 static void minimap_init(Display *dpy);
 static void minimap_draw_one(Window panel, int mon, int mon_w, int mon_h, int mon_x, int mon_y);
+static long now_ms(void);
 void minimap_update(void);
 static void always_ot();
 void toggle_minimap(const Arg arg);
