@@ -45,6 +45,7 @@ typedef struct client {
   int monitor;
   int f;
   int wx, wy;
+  int mx, my;
   int x, y;
   int width, height;
   int oldx, oldy, oldwidth, oldheight;
@@ -92,7 +93,13 @@ void canvas_reset(const Arg arg);
 void canvas_apply_all(void);
 void canvas_focus(client *c);
 
+static void hud_create(void);
 void hud_update(void);
+void minimap_create(void);
+static void minimap_draw_one(Window panel, int mon, int mon_w, int mon_h, int mon_x, int mon_y);
+void minimap_update(void);
+static void always_ot();
+void toggle_minimap(const Arg arg);
 Window titlebar_create(client *c);
 void titlebar_draw(client *c);
 void titlebar_del(client *c);

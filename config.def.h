@@ -10,6 +10,12 @@
 #define PAN_STEP      120
 #define ROUND_CORNERS 0
 
+// HUD
+#define UI_HUD 1
+
+// Coordinates 
+#define CORDS 0
+
 #define ZOOM_STEP     1.1f
 #define ZOOM_STEP_OUT 0.9f
 #define ZOOM_MIN      0.125f
@@ -36,6 +42,7 @@ static struct key keys[] = {
 
     { MOD,             XK_period, ws_focusnext,    {0}             },
     { MOD|ShiftMask,   XK_period, move_nextmon,    {0}             },
+    { MOD,             XK_b,	  toggle_minimap,  {0}		   },
 
     { MOD|ShiftMask,   XK_Left,   canvas_pan_key,  {.i = 0}        },
     { MOD|ShiftMask,   XK_Right,  canvas_pan_key,  {.i = 1}        },

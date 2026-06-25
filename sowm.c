@@ -16,6 +16,7 @@
 #include <unistd.h>
 
 #include "sowm.h"
+#include "config.def.h"
 
 static client *list = NULL;
 static client *cur  = NULL;
@@ -43,6 +44,11 @@ static Display     *d;
 static XButtonEvent mouse;
 static Window       root;
 static Window       hud_win = 0;
+static Window	    minimap_win[MAX_MONITORS] = {0};
+static GC	    minimap_gc                = 0;
+int		    minimap		      = 1;
+static int	    minimap_px[MAX_MONITORS]  = {0};
+static int	    minimap_py[MAX_MONITORS]  = {0};
 
 static void (*events[LASTEvent])(XEvent *e);
 
@@ -117,6 +123,159 @@ int mon_at_win(Window w) {
     return mon;
 }
 
+void minimap_create(void) {
+    int n;
+    XineramaScreenInfo *info = XineramaQueryScreens(d, &n);
+
+    if (!info) return;
+
+    int x0 = 1<<30, y0 = 1<<30, x1 = 0, y1 = 0;
+
+    for (int i = 0; i < n; i++) {
+	x0 = MIN(x0, info[i].x_org);
+	y0 = MIN(y0, info[i].y_org);
+	x1 = MAX(x1, info[i].x_org + info[i].width);
+	y1 = MAX(y1, info[i].y_org + info[i].height);
+    }
+
+    float layout_w = (float)(x1 - x0);
+    float layout_h = (float)(y1 - y0);
+    float box_w = 220, box_h = 220;
+    float scale = MIN(box_w / layout_w, box_h / layout_h);
+
+    int gap = 5;
+    int origin_x = 10, origin_y = 10; 
+
+    minimap_gc = XCreateGC(d, root, 0, NULL);
+
+    for (int i = 0; i < n && i < MAX_MONITORS; i++) {
+        int rank_x = 0, rank_y = 0;
+        for (int j = 0; j < n; j++) {
+            if (info[j].x_org < info[i].x_org) rank_x++;
+            if (info[j].y_org < info[i].y_org) rank_y++;
+        }
+
+	int px = origin_x + (int)((info[i].x_org - x0) * scale) + rank_x * gap;
+	int py = origin_y + (int)((info[i].y_org - y0) * scale) + rank_y * gap;
+	minimap_px[i] = px;
+	minimap_py[i] = py;
+        int pw = MAX(40, (int)(info[i].width  * scale));
+        int ph = MAX(30, (int)(info[i].height * scale));
+
+        XSetWindowAttributes attr;
+        attr.override_redirect = True;
+        attr.background_pixel  = 0x111111;
+        attr.border_pixel      = 0x444444;
+        attr.event_mask        = ExposureMask;
+
+        minimap_win[i] = XCreateWindow(d, root, px, py, pw, ph, 0,
+                                        CopyFromParent, InputOutput, CopyFromParent,
+                                        CWOverrideRedirect | CWBackPixel | CWBorderPixel | CWEventMask,
+                                        &attr);
+        XMapWindow(d, minimap_win[i]);
+        XRaiseWindow(d, minimap_win[i]);
+    }
+
+    XFree(info);
+}
+
+static void minimap_draw_one(Window panel, int mon, int mon_w, int mon_h, int mon_x, int mon_y) {
+    if (!panel) return;
+
+    unsigned int mw, mh;
+    int mxw, myw;
+    win_size(panel, &mxw, &myw, &mw, &mh);
+
+    XClearWindow(d, panel);
+    XRaiseWindow(d, panel);
+
+    float minx =  1e9f, miny =  1e9f;
+    float maxx = -1e9f, maxy = -1e9f;
+    int   any  = 0;
+
+    for win {
+        if (c->monitor != mon) continue;
+        any  = 1;
+        minx = MIN(minx, c->cx);
+        miny = MIN(miny, c->cy);
+        maxx = MAX(maxx, c->cx + c->width);
+        maxy = MAX(maxy, c->cy + c->height);
+    }
+
+    float vx0 = mon_x + canvas.pan_x[mon];
+    float vy0 = mon_y +canvas.pan_y[mon];
+    float vx1 = vx0 + mon_w;
+    float vy1 = vy0 + mon_h;
+
+    if (!any) { minx = vx0; miny = vy0; maxx = vx1; maxy = vy1; }
+    minx = MIN(minx, vx0); miny = MIN(miny, vy0);
+    maxx = MAX(maxx, vx1); maxy = MAX(maxy, vy1);
+
+    float bw = MAX(maxx - minx, 1.0f);
+    float bh = MAX(maxy - miny, 1.0f);
+    float scale = MIN(((float)mw - 8) / bw, ((float)mh - 8) / bh);
+
+#define MM_X(v) (int)(4 + ((v) - minx) * scale)
+#define MM_Y(v) (int)(4 + ((v) - miny) * scale)
+
+    XSetForeground(d, minimap_gc, 0x555555);
+    XDrawRectangle(d, panel, minimap_gc,
+                    MM_X(vx0), MM_Y(vy0),
+                    MAX(1, (int)((vx1 - vx0) * scale)),
+                    MAX(1, (int)((vy1 - vy0) * scale)));
+
+    for win {
+        if (c->monitor != mon) continue;
+
+        int rw = MAX(2, (int)(c->width  * scale));
+        int rh = MAX(2, (int)(c->height * scale));
+
+        XSetForeground(d, minimap_gc, c == cur ? 0xffffff : 0x505050);
+        XFillRectangle(d, panel, minimap_gc,
+                        MM_X(c->cx), MM_Y(c->cy), rw, rh);
+    }
+
+#undef MM_X
+#undef MM_Y
+
+    XFlush(d);
+}
+
+void minimap_update(void) {
+    int n;
+    XineramaScreenInfo *info = XineramaQueryScreens(d, &n);
+
+    if (!info) return;
+
+    for (int i = 0; i < n; i++) {
+	minimap_draw_one(minimap_win[i], i, info[i].width, info[i].height, info[i].x_org, info[i].y_org);
+    }
+
+    XFree(info);
+}
+
+static void always_ot() {
+    if (!minimap)
+        return;
+
+    for (int i = 0; i < MAX_MONITORS; i++)
+        if (minimap_win[i]) XRaiseWindow(d, minimap_win[i]);
+}
+
+void toggle_minimap(const Arg arg) {
+    minimap = !minimap;
+
+    for (int i = 0; i < MAX_MONITORS; i++) {
+	if (!minimap_win[i]) continue;
+
+	if (minimap)
+	    XMoveWindow(d, minimap_win[i], minimap_px[i], minimap_py[i]);
+	else
+	    XMoveWindow(d, minimap_win[i], -800, minimap_py[i]);
+    }
+    XFlush(d);
+}
+
 static void hud_create(void) {
     int hud_w = 320, hud_h = 30;
     int hud_x = (sw - hud_w) / 2;
@@ -155,26 +314,26 @@ void hud_update(void) {
     XftFont *font = XftFontOpenName( d, DefaultScreen(d), "monospace:size=12" );
 
     if (font) {
-    XRenderColor xr = { .red   = 65535, .green = 65535, .blue  = 65535, .alpha = 65535 };
-
-    XftColor color;
-    XftColorAllocValue(d, visual, cmap, &xr, &color);
-
-    XGlyphInfo ext;
-    XftTextExtentsUtf8( d, font, (FcChar8 *)buf, strlen(buf), &ext);
-
-    unsigned int hw, hh;
-    int hx, hy;
-    win_size(hud_win, &hx, &hy, &hw, &hh);
-
-    int x = ((int)hw - ext.xOff) / 2;
-    int y = (hh + font->ascent) / 2.2;
-
-    XftDrawStringUtf8(draw, &color, font, x, y, (FcChar8 *)buf, strlen(buf));
-
-    XftColorFree(d, visual, cmap, &color);
-    XftFontClose(d, font);
-}
+	XRenderColor xr = { .red   = 65535, .green = 65535, .blue  = 65535, .alpha = 65535 };
+	
+	XftColor color;
+	XftColorAllocValue(d, visual, cmap, &xr, &color);
+	
+	XGlyphInfo ext;
+	XftTextExtentsUtf8( d, font, (FcChar8 *)buf, strlen(buf), &ext);
+	
+	unsigned int hw, hh;
+	int hx, hy;
+	win_size(hud_win, &hx, &hy, &hw, &hh);
+	
+	int x = ((int)hw - ext.xOff) / 2;
+	int y = (hh + font->ascent) / 2.2;
+	
+	XftDrawStringUtf8(draw, &color, font, x, y, (FcChar8 *)buf, strlen(buf));
+	
+	XftColorFree(d, visual, cmap, &color);
+	XftFontClose(d, font);
+    }
     XftDrawDestroy(draw);
     XFlush(d);
 }
@@ -254,8 +413,11 @@ void configure(client *c) {
 void resizeclient(client *c, int w, int h) {
     XWindowChanges wc;
 
-    c->oldwidth = c->width;   c->width  = wc.width  = w;
-    c->oldheight = c->height; c->height = wc.height = h;
+    c->oldwidth = c->width; 
+    c->width = wc.width = w;
+
+    c->oldheight = c->height;
+    c->height = wc.height = h;
 
     XConfigureWindow(d, c->w, CWWidth | CWHeight, &wc);
     configure(c);
@@ -273,6 +435,7 @@ void client_resize(client *c, unsigned int w, unsigned int h) {
     int nw = (int)w, nh = (int)h;
     if (applysizehints(c, &nw, &nh))
         resizeclient(c, nw, nh);
+    minimap_update();
 }
 
 void updatesizehints(client *c) {
@@ -415,6 +578,7 @@ void canvas_apply_all(void) {
     }
     XFlush(d);
     hud_update();
+    minimap_update();
 }
 
 void canvas_pan(int mon, float dx, float dy) {
@@ -520,6 +684,7 @@ void notify_enter(XEvent *e) {
     for win
         if (c->w == e->xcrossing.window)
             win_focus(c);
+    minimap_update();
 }
 
 void notify_property(XEvent *e) {
@@ -573,6 +738,7 @@ void notify_motion(XEvent *e) {
         int new_sx = wx + xd;
         int new_sy = wy + yd;
         client_move(cur, new_sx, new_sy);
+	minimap_update();
         if (cur) {
             cur->monitor = mon_at_win(cur->w);
             int   m = cur->monitor;
@@ -983,13 +1149,32 @@ int main(void) {
     XDefineCursor(d, root, XCreateFontCursor(d, 68));
     input_grab(root);
 
-    hud_create();
-    hud_update();
+
+    if (UI_HUD) {
+	if (CORDS) {
+	// Coordinates
+	    hud_create();
+	    hud_update();
+	}
+
+	minimap_create();
+	if (!minimap) {
+	    for (int i = 0; i < MAX_MONITORS; i++) {
+		if (minimap_win[i])
+		    XMoveWindow(d, minimap_win[i], -800, minimap_py[i]);
+	    }
+	}
+    }
+
 
     while (1 && !XNextEvent(d, &ev)) {
         if ((ev.type == MapNotify || ev.type == ConfigureNotify) && hud_win)
             XRaiseWindow(d, hud_win);
         if (events[ev.type])
             events[ev.type](&ev);
+	if (UI_HUD)
+	    always_ot();
+	else
+	    printf("No HUD");
     }
 }
