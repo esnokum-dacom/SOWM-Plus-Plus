@@ -21,6 +21,11 @@
 static client *list = NULL;
 static client *cur  = NULL;
 
+static XftFont  *mm_font = NULL;
+static XftDraw  *mm_draw = NULL;
+static XftColor  mm_color;
+static int mm_inited = 0;
+
 static canvas_state canvas = {
     .pan_x = {0}, .pan_y = {0},
     .zoom  = {1,1,1,1,1,1,1,1}
@@ -179,12 +184,39 @@ void minimap_create(void) {
     XFree(info);
 }
 
+static void minimap_init(Display *dpy) {
+    if (mm_inited) return;
+
+    Visual *visual = DefaultVisual(dpy, DefaultScreen(dpy));
+    Colormap cmap  = DefaultColormap(dpy, DefaultScreen(dpy));
+
+    XRenderColor xr = {
+        .red = 0x0000,
+        .green = 0x0000,
+        .blue = 0x0000,
+        .alpha = 0xFFFF
+    };
+
+    XftColorAllocValue(dpy, visual, cmap, &xr, &mm_color);
+
+    mm_font = XftFontOpenName(dpy, DefaultScreen(dpy), "monospace:size=12");
+    mm_inited = 1;
+}
+
 static void minimap_draw_one(Window panel, int mon, int mon_w, int mon_h, int mon_x, int mon_y) {
     if (!panel) return;
+
+    minimap_init(d);
 
     unsigned int mw, mh;
     int mxw, myw;
     win_size(panel, &mxw, &myw, &mw, &mh);
+
+    Visual *visual = DefaultVisual(d, DefaultScreen(d));
+    Colormap cmap  = DefaultColormap(d, DefaultScreen(d));
+
+    if (mm_draw) XftDrawDestroy(mm_draw);
+    mm_draw = XftDrawCreate(d, panel, visual, cmap);
 
     XClearWindow(d, panel);
     XRaiseWindow(d, panel);
@@ -227,17 +259,30 @@ static void minimap_draw_one(Window panel, int mon, int mon_w, int mon_h, int mo
     for win {
         if (c->monitor != mon) continue;
 
+      	int rx = MM_X(c->cx);
+        int ry = MM_Y(c->cy);
+
         int rw = MAX(2, (int)(c->width  * scale));
         int rh = MAX(2, (int)(c->height * scale));
-
+	
         XSetForeground(d, minimap_gc, c == cur ? 0xffffff : 0x505050);
         XFillRectangle(d, panel, minimap_gc,
                         MM_X(c->cx), MM_Y(c->cy), rw, rh);
+
+	char *buf = client_get_title(c->w);;
+        if (!buf) buf = "";
+
+	XGlyphInfo ext;
+	XftTextExtentsUtf8(d, mm_font, (FcChar8 *)buf, strlen(buf), &ext);
+	int bx = rx + rw / 2, by = ry + ext.height + 5;
+	int x = bx - ext.xOff / 2;
+
+	XSetForeground(d, minimap_gc, 0x000000);
+	XftDrawStringUtf8(mm_draw, &mm_color, mm_font, x, by, (FcChar8 *)buf, strlen(buf));
     }
 
 #undef MM_X
 #undef MM_Y
-
     XFlush(d);
 }
 
@@ -493,41 +538,46 @@ int applysizehints(client *c, int *w, int *h) {
     return *w != c->width || *h != c->height;
 }
 
-char *client_get_title(Window w) {
-    Atom actual_type;
-    int actual_format;
+char *client_get_title(Window w)
+{
+    XClassHint hint;
+    char *name = NULL;
 
-    unsigned long nitems;
-    unsigned long bytes_after;
+    if (XGetClassHint(d, w, &hint))
+    {
+        if (hint.res_class)
+        {
+            name = copystr(hint.res_class);
+            XFree(hint.res_name);
+            XFree(hint.res_class);
+            return name;
+        }
 
-    unsigned char *prop = NULL;
-
-    Atom visible = XInternAtom(d, "_NET_WM_VISIBLE_NAME", False);
+        if (hint.res_name)
+        {
+            name = copystr(hint.res_name);
+            XFree(hint.res_name);
+            return name;
+        }
+    }
 
     Atom netname = XInternAtom(d, "_NET_WM_NAME", False);
+    Atom utf8    = XInternAtom(d, "UTF8_STRING", False);
 
-    Atom utf8 = XInternAtom(d, "UTF8_STRING", False);
+    Atom actual_type;
+    int actual_format;
+    unsigned long nitems, bytes_after;
+    unsigned char *prop = NULL;
 
-    if (XGetWindowProperty(d, w, visible, 0, 1024, False, utf8, &actual_type, &actual_format, &nitems, &bytes_after, &prop ) == Success && prop)
+    if (XGetWindowProperty(d, w, netname, 0, 1024, False, utf8,
+        &actual_type, &actual_format, &nitems, &bytes_after, &prop) == Success && prop)
     {
-        return copystr((char *)prop);
+        name = copystr((char *)prop);
+        XFree(prop);
+        return name;
     }
 
-    prop = NULL;
-
-    if (XGetWindowProperty(d, w, netname, 0, 1024, False, utf8, &actual_type, &actual_format, &nitems, &bytes_after, &prop ) == Success && prop)
-    {
-        return copystr((char *)prop);
-    }
-
-    XTextProperty text;
-
-    if (XGetWMName(d, w, &text) && text.value)
-    {
-        return copystr((char *)text.value);
-    }
-
-    return copystr("Untitled");
+    return copystr("unknown");
 }
 
 void titlebar_draw(client *c) {
@@ -654,6 +704,7 @@ void win_next(const Arg arg) { if (cur) canvas_focus(cur->next); }
 
 void notify_destroy(XEvent *e) {
     win_del(e->xdestroywindow.window);
+    minimap_update();
     if (list)
         win_focus(list->prev);
     else {
@@ -1007,6 +1058,7 @@ void map_request(XEvent *e) {
     XSelectInput(d, w, StructureNotifyMask | EnterWindowMask | PropertyChangeMask);
     win_size(w, &wx, &wy, &ww, &wh);
     win_add(w);
+    minimap_update();
     cur = list->prev;
     if (wx + wy == 0) win_center((Arg){0});
     {
@@ -1088,6 +1140,7 @@ void ws_focusnext(const Arg arg) {
     XWarpPointer(d, None, root, 0, 0, 0, 0,
                  info[next].x_org + info[next].width  / 2,
                  info[next].y_org + info[next].height / 2);
+    minimap_update();
     XFree(info);
     XFlush(d);
 }
@@ -1124,6 +1177,7 @@ void move_nextmon(const Arg arg) {
         int new_sx = info[next].x_org + (info[next].width  - (int)cw) / 2;
         int new_sy = info[next].y_org + (info[next].height - (int)ch) / 2;
         client_move(cur, new_sx, new_sy);
+	minimap_update();
         cur->monitor = next;
         float z = canvas.zoom[next];
         cur->cx = (float)new_sx / z + canvas.pan_x[next];
