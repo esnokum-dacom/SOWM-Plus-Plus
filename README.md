@@ -6,11 +6,13 @@
 - Mix of mouse and keyboard workflow.
 - Focus with the cursor.
 - Infinite canvas
+- Minimap for the infinite canvas
 - Rounded corners (added)
 - change display with key-bind
 
 - Alt-Tab window focusing.
 - All windows die on exit.
+- Partial EWMH support
 - No window borders.
 - No EWMH.
 
@@ -36,6 +38,7 @@ You can change the keybinding in the `config.de.h`
 | `MOD1` + `Shift` + `Up`    | Move the canvas to the Up |
 | `MOD1` + `Shift` + `Down`  | Move the canvas to the Down |
 | `Mouse wheel` (Press)      | Move the canvas with the mouse position |
+| `MOD1` + `b` | Toggle the minimap |
 
 **Programs**
 
@@ -52,10 +55,26 @@ You can change the keybinding in the `config.de.h`
 
 # Experimental Options 
 
-In the `sowm.h` You can turn on an experimental option called TITLEBAR
-This option is specifically experimental so if it doesn't work propperly with some applications please report and the patches are welcome
+In the `sowm.h`, you can turn on an experimental option called TITLEBAR
+This option is specifically experimental, so if it doesn't work properly with some applications, please report, and the patches are welcome
 
 ## Dependencies
 
 - `xlib` (*usually `libX11`*).
 - `Xinerama `(By Xlib).
+
+## Thanks
+
+- [sowm](https://github.com/dylanaraps/sowm) (where all of this started)
+- [sowm-extended](https://github.com/kantiankant/sowm-extended) (For your help with the code)
+- [2bwm](https://github.com/venam/2bwm)
+- [SmallWM](https://github.com/adamnew123456/SmallWM)
+- [berry](https://github.com/JLErvin/berry)
+- [catwm](https://github.com/pyknite/catwm)
+- [dminiwm](https://github.com/moetunes/dminiwm)
+- [dwm](https://dwm.suckless.org)
+- [monsterwm](https://github.com/c00kiemon5ter/monsterwm)
+- [openbox](https://github.com/danakj/openbox)
+- [possum-wm](https://github.com/duckinator/possum-wm)
+- [swm](https://github.com/dcat/swm)
+- [tinywm](http://incise.org/tinywm.html)
