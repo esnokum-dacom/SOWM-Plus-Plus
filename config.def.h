@@ -10,6 +10,9 @@
 #define PAN_STEP      120
 #define ROUND_CORNERS 0
 
+// Title bar
+#define TITLEBAR 1
+
 // HUD
 #define UI_HUD 1
 

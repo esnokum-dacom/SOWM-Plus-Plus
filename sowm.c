@@ -489,6 +489,7 @@ void client_resize(client *c, unsigned int w, unsigned int h) {
     if (applysizehints(c, &nw, &nh))
         resizeclient(c, nw, nh);
     minimap_update();
+    titlebar_draw(c);
 }
 
 void updatesizehints(client *c) {
@@ -637,6 +638,7 @@ void canvas_apply_all(void) {
     XFlush(d);
     hud_update();
     minimap_update();
+    titlebar_draw(cur);
 }
 
 void canvas_pan(int mon, float dx, float dy) {
@@ -741,8 +743,10 @@ void notify_unmap(XEvent *e) {
 void notify_enter(XEvent *e) {
     while (XCheckTypedEvent(d, EnterNotify, e));
     for win
-        if (c->w == e->xcrossing.window)
+        if (c->w == e->xcrossing.window) {
             win_focus(c);
+	    titlebar_draw(c);
+    }
     minimap_update();
 }
 
@@ -798,6 +802,7 @@ void notify_motion(XEvent *e) {
         int new_sy = wy + yd;
         client_move(cur, new_sx, new_sy);
 	minimap_update();
+	titlebar_draw(cur);
         if (cur) {
             cur->monitor = mon_at_win(cur->w);
             int   m = cur->monitor;
@@ -895,7 +900,8 @@ void win_del(Window w) {
     client *x = NULL;
     for win if (c->w == w) x = c;
     if (!list || !x) return;
-    titlebar_del(x);
+    if (x->titlebar)titlebar_del(x);
+    // titlebar_del(x);
     if (x->prev == x) list = NULL;
     if (list == x)    list = x->next;
     if (x->next) x->next->prev = x->prev;
@@ -1119,38 +1125,20 @@ void map_request(XEvent *e) {
     win_size(w, &wx, &wy, &ww, &wh);
     win_add(w);
     minimap_update();
+    titlebar_draw(cur);
     cur = list->prev;
 
-    if (wx + wy == 0) win_center((Arg){0});
-    {
-        int sx = 0, sy = 0;
-        unsigned int dw2, dh2;
-        win_size(w, &sx, &sy, &dw2, &dh2);
-        cur->monitor = mon_at_win(w);
-        int   m = cur->monitor;
-        float z = canvas.zoom[m];
-        cur->cx = (float)sx / z + canvas.pan_x[m];
-        cur->cy = (float)sy / z + canvas.pan_y[m];
-    }
-
-    if (wx + wy == 0) {
-        int cx, cy, dummy;
-        unsigned int udummy;
-        Window wdummy;
-        XQueryPointer(d, root, &wdummy, &wdummy, &cx, &cy, &dummy, &dummy, &udummy);
-        win_size(w, &dummy, &dummy, &ww, &wh);
-        int ax = strut[0];
-        int ay = strut[2];
-        int aw = sw - strut[0] - strut[1];
-        int ah = sh - strut[2] - strut[3];
-        int nx = cx - (int)ww / 2;
-        int ny = cy - (int)wh / 2;
-        if (nx < ax)                 nx = ax;
-        if (ny < ay)                 ny = ay;
-        if (nx + (int)ww > ax + aw)  nx = ax + aw - (int)ww;
-        if (ny + (int)wh > ay + ah)  ny = ay + ah - (int)wh;
-        XMoveWindow(d, w, nx, ny);
-    }
+   if (wx + wy == 0) win_center((Arg){0});
+   {
+       int sx = 0, sy = 0;
+       unsigned int dw2, dh2;
+       win_size(w, &sx, &sy, &dw2, &dh2);
+       cur->monitor = mon_at_win(w);
+       int   m = cur->monitor;
+       float z = canvas.zoom[m];
+       cur->cx = (float)sx / z + canvas.pan_x[m];
+       cur->cy = (float)sy / z + canvas.pan_y[m];
+   }
 
     XMapWindow(d, w);
     win_focus(list->prev);
@@ -1222,6 +1210,7 @@ void ws_focusnext(const Arg arg) {
                  info[next].x_org + info[next].width  / 2,
                  info[next].y_org + info[next].height / 2);
     minimap_update();
+    titlebar_draw(cur);
     XFree(info);
     XFlush(d);
 }
@@ -1259,6 +1248,7 @@ void move_nextmon(const Arg arg) {
         int new_sy = info[next].y_org + (info[next].height - (int)ch) / 2;
         client_move(cur, new_sx, new_sy);
 	minimap_update();
+	titlebar_draw(cur);
         cur->monitor = next;
         float z = canvas.zoom[next];
         cur->cx = (float)new_sx / z + canvas.pan_x[next];

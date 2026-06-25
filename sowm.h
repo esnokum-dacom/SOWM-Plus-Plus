@@ -5,7 +5,6 @@
 
 #define MAX_MONITORS 8
 #define TITLEBAR_HEIGHT 24
-#define TITLEBAR 0
 
 #define win (client *t = 0, *c = list; c && t != list->prev; t = c, c = c->next)
 

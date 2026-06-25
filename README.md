@@ -9,6 +9,7 @@
 - Minimap for the infinite canvas
 - Rounded corners (added)
 - change display with key-bind
+- Added titlebar (in config.def.h you can toggle it)
 
 - Alt-Tab window focusing.
 - All windows die on exit.
@@ -52,11 +53,6 @@ You can change the keybinding in the `config.de.h`
 | `XF86_AudioMute`         | volume toggle    | `amixer`       |
 | `XF86_MonBrightnessUp`   | brightness up    | `bri`          |
 | `XF86_MonBrightnessDown` | brightness down  | `bri`          |
-
-# Experimental Options 
-
-In the `sowm.h`, you can turn on an experimental option called TITLEBAR
-This option is specifically experimental, so if it doesn't work properly with some applications, please report, and the patches are welcome
 
 ## Dependencies
 
