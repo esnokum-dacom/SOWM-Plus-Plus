@@ -10,11 +10,14 @@
 #define PAN_STEP      120
 #define ROUND_CORNERS 0
 
+// Title bar
+#define TITLEBAR 1
+
 // HUD
 #define UI_HUD 1
 
 // Coordinates 
-#define CORDS 0
+#define CORDS 1
 
 #define ZOOM_STEP     1.1f
 #define ZOOM_STEP_OUT 0.9f
@@ -34,7 +37,7 @@ static const char *volup[]   = {"amixer", "sset", "Master", "5%+", 0};
 static const char *volmute[] = {"amixer", "sset", "Master", "toggle", 0};
 
 static struct key keys[] = {
-    { MOD | ShiftMask, XK_c,      win_kill,       {0}             },
+    { MOD | ShiftMask, XK_c,      win_kill,        {0}             },
     { MOD,             XK_c,      win_center,      {0}             },
     { MOD,             XK_f,      win_fs,          {0}             },
     { Mod1Mask,        XK_Tab,    win_next,        {0}             },
@@ -42,7 +45,7 @@ static struct key keys[] = {
 
     { MOD,             XK_period, ws_focusnext,    {0}             },
     { MOD|ShiftMask,   XK_period, move_nextmon,    {0}             },
-    { MOD,             XK_b,	  toggle_minimap,  {.i = 1}        },
+    { MOD,             XK_b,	  toggle_minimap,  {0}		   },
 
     { MOD|ShiftMask,   XK_Left,   canvas_pan_key,  {.i = 0}        },
     { MOD|ShiftMask,   XK_Right,  canvas_pan_key,  {.i = 1}        },

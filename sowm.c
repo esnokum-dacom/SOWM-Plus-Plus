@@ -337,6 +337,8 @@ static void always_ot() {
 
     for (int i = 0; i < MAX_MONITORS; i++)
         if (minimap_win[i]) XRaiseWindow(d, minimap_win[i]);
+
+    printf("cur=%p f=%d\n", cur, cur ? cur->f : -1);
 }
 
 void toggle_minimap(const Arg arg) {
@@ -377,8 +379,17 @@ void hud_update(void) {
     float px  = canvas.pan_x[mon];
     float py  = canvas.pan_y[mon];
 
-    char buf[80];
-    snprintf(buf, sizeof(buf), "X: %d  Y: %d", (int)px, (int)py);
+    char hud_text[256];
+
+    if (!cur) {
+        snprintf(hud_text, sizeof(hud_text), "X: %d Y: %d", (int)px, (int)py);
+    } else if (cur->f) {
+        char *wt = client_get_title(cur->w);
+        snprintf(hud_text, sizeof(hud_text), "%s is fullscreen", wt ? wt : "unknown");
+        free(wt);
+    } else {
+        snprintf(hud_text, sizeof(hud_text), "X: %d Y: %d", (int)px, (int)py);
+    }
 
     XClearWindow(d, hud_win);
     XRaiseWindow(d, hud_win);
@@ -397,7 +408,7 @@ void hud_update(void) {
 	XftColorAllocValue(d, visual, cmap, &xr, &color);
 	
 	XGlyphInfo ext;
-	XftTextExtentsUtf8( d, font, (FcChar8 *)buf, strlen(buf), &ext);
+	XftTextExtentsUtf8( d, font, (FcChar8 *)hud_text, strlen(hud_text), &ext);
 	
 	unsigned int hw, hh;
 	int hx, hy;
@@ -406,7 +417,7 @@ void hud_update(void) {
 	int x = ((int)hw - ext.xOff) / 2;
 	int y = (hh + font->ascent) / 2.2;
 	
-	XftDrawStringUtf8(draw, &color, font, x, y, (FcChar8 *)buf, strlen(buf));
+	XftDrawStringUtf8(draw, &color, font, x, y, (FcChar8 *)hud_text, strlen(hud_text));
 	
 	XftColorFree(d, visual, cmap, &color);
 	XftFontClose(d, font);
@@ -739,6 +750,7 @@ void win_next(const Arg arg) { if (cur) canvas_focus(cur->next); }
 void notify_destroy(XEvent *e) {
     win_del(e->xdestroywindow.window);
     minimap_update();
+
     if (list)
         win_focus(list->prev);
     else {
@@ -848,6 +860,9 @@ void key_press(XEvent *e) {
 }
 
 void button_press(XEvent *e) {
+    if (cur && cur->f)
+	return;
+
     if (e->xbutton.button == 2) {
         pan_active   = 1;
         pan_mon      = mon_at_ptr();
@@ -1021,13 +1036,31 @@ void win_fs(const Arg arg) {
         XFree(info);
     }
 
-    if ((cur->f = cur->f ? 0 : 1)) {
-        XMoveResizeWindow(d, cur->w, mx, my, mw, mh);
-        if (cur->titlebar) XUnmapWindow(d, cur->titlebar);
+    cur->f = !cur->f;
+
+    if (cur->f) {
+        // XMoveResizeWindow(d, cur->w, mx, my, mw, mh);
+	if (TITLEBAR) {
+	    resizeclient(cur, mw, mh - TITLEBAR_HEIGHT);
+	    client_move(cur, mx, my + TITLEBAR_HEIGHT);
+	}
+	else {
+	    resizeclient(cur, mw, mh);
+	    client_move(cur, mx, my);
+	}
+
+	hud_update();
+	minimap_update();
+        if (!TITLEBAR) XUnmapWindow(d, cur->titlebar);
     } else {
-        XMoveResizeWindow(d, cur->w, cur->wx, cur->wy, cur->ww, cur->wh);
+        // XMoveResizeWindow(d, cur->w, cur->wx, cur->wy, cur->ww, cur->wh);
+	resizeclient(cur, cur->ww, cur->wh);
+	client_move(cur, cur->wx, cur->wy);
+	minimap_update();
         if (cur->titlebar) {
-            XMoveResizeWindow(d, cur->titlebar, cur->wx, cur->wy - TITLEBAR_HEIGHT, cur->ww, TITLEBAR_HEIGHT);
+            // XMoveResizeWindow(d, cur->titlebar, cur->wx, cur->wy - TITLEBAR_HEIGHT, cur->ww, TITLEBAR_HEIGHT);
+	    resizeclient(cur, cur->ww, cur->wh);
+	    client_move(cur, cur->wx, cur->wy);
             XMapWindow(d, cur->titlebar);
             titlebar_draw(cur);
         }
@@ -1356,8 +1389,10 @@ int main(void) {
             XRaiseWindow(d, hud_win);
         if (events[ev.type])
             events[ev.type](&ev);
-	if (UI_HUD)
+	if (UI_HUD) {
 	    always_ot();
+	    hud_update();
+	}
 	else
 	    printf("No HUD");
     }

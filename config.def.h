@@ -37,7 +37,7 @@ static const char *volup[]   = {"amixer", "sset", "Master", "5%+", 0};
 static const char *volmute[] = {"amixer", "sset", "Master", "toggle", 0};
 
 static struct key keys[] = {
-    { MOD | ShiftMask, XK_c,      win_kill,       {0}             },
+    { MOD | ShiftMask, XK_c,      win_kill,        {0}             },
     { MOD,             XK_c,      win_center,      {0}             },
     { MOD,             XK_f,      win_fs,          {0}             },
     { Mod1Mask,        XK_Tab,    win_next,        {0}             },
