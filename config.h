@@ -47,6 +47,9 @@ static struct key keys[] = {
     { MOD|ShiftMask,   XK_period, move_nextmon,    {0}             },
     { MOD,             XK_b,	  toggle_minimap,  {0}		   },
 
+    { MOD,             XK_j,  canvas_zoom,     {.f = -1}	   },
+    { MOD,             XK_k,  canvas_zoom,     {.f = 1}		   },
+
     { MOD|ShiftMask,   XK_Left,   canvas_pan_key,  {.i = 0}        },
     { MOD|ShiftMask,   XK_Right,  canvas_pan_key,  {.i = 1}        },
     { MOD|ShiftMask,   XK_Up,     canvas_pan_key,  {.i = 2}        },

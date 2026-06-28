@@ -4,12 +4,14 @@
 #include <stdlib.h>
 
 #define MAX_MONITORS 8
-#define TITLEBAR_HEIGHT 24
+#define TITLEBAR_HEIGHT 25
+#define SPAWN_SEARCH_STEP 30
+#define SPAWN_SEARCH_MAX  40
 
 #define win (client *t = 0, *c = list; c && t != list->prev; t = c, c = c->next)
 
-#define canvas_to_screen(val, pan, zoom) (int)(((val) - (pan)) * (zoom))
-#define screen_to_canvas(val, pan, zoom) ((val) / (zoom) + (pan))
+#define canvas_to_screen(val, pan) (int)(((val) - (pan)))
+#define screen_to_canvas(val, pan) ((val) / (pan))
 
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
@@ -27,6 +29,7 @@
 typedef struct {
   const char **com;
   const int    i;
+  const float    f;
   const Window w;
 } Arg;
 
@@ -47,6 +50,7 @@ typedef struct client {
   int mx, my;
   int x, y;
   int width, height;
+  float base_width, base_height;
   int oldx, oldy, oldwidth, oldheight;
   int basew, baseh, incw, inch, maxw, maxh, minw, minh;
   float mina, maxa;      
@@ -57,7 +61,7 @@ typedef struct client {
 typedef struct {
   float pan_x[MAX_MONITORS];
   float pan_y[MAX_MONITORS];
-  float zoom[MAX_MONITORS];
+  float zoom;
 } canvas_state;
 
 typedef struct {
@@ -95,7 +99,9 @@ void ws_focusnext(const Arg arg);
 
 void canvas_pan(int mon, float dx, float dy);
 void canvas_pan_key(const Arg arg);
+void canvas_zoom_key(const Arg arg);
 void canvas_reset(const Arg arg);
+static void canvas_sync_to_root(void);
 void canvas_apply_all(void);
 void canvas_focus(client *c);
 
