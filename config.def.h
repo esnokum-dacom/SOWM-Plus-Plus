@@ -13,6 +13,12 @@
 // Title bar
 #define TITLEBAR 1
 
+// BORDER
+
+#define BORDER	    1
+#define BORDER_W    3
+
+
 // HUD
 #define UI_HUD 1
 

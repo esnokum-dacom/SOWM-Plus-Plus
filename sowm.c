@@ -57,7 +57,8 @@ static GC	    minimap_gc                = 0;
 static Atom canvas_atom_pan_x, canvas_atom_pan_y;
 static Atom net_supported, net_wm_window_type, net_wm_window_type_dock,
             net_wm_strut, net_wm_strut_partial, net_current_desktop,
-            net_supporting_wm_check, net_wm_name, ewmh_utf8_string;
+            net_supporting_wm_check, net_wm_name, net_wm_visible_name,
+            ewmh_utf8_string;
 
 
 static int strut[4] = {0, 0, 0, 0};
@@ -66,8 +67,6 @@ static long mm_last_update_ms = 0;
 int		    minimap		      = 1;
 static int	    minimap_px[MAX_MONITORS]  = {0};
 static int	    minimap_py[MAX_MONITORS]  = {0};
-
-static void (*events[LASTEvent])(XEvent *e);
 
 #include "config.h"
 
@@ -96,16 +95,10 @@ char *copystr(const char *s)
     return p;
 }
 
-int mon_at_ptr(void) {
-    int px, py, di;
-    unsigned int du;
-    Window dw;
-    XQueryPointer(d, root, &dw, &dw, &px, &py, &di, &di, &du);
-
+static int mon_from_point(int px, int py) {
     int n;
     XineramaScreenInfo *info = XineramaQueryScreens(d, &n);
     if (!info) return 0;
-
     int mon = 0;
     for (int i = 0; i < n && i < MAX_MONITORS; i++) {
         if (px >= info[i].x_org && px < info[i].x_org + info[i].width &&
@@ -117,27 +110,21 @@ int mon_at_ptr(void) {
     return mon;
 }
 
+int mon_at_ptr(void) {
+    int px, py, di;
+    unsigned int du;
+    Window dw;
+    XQueryPointer(d, root, &dw, &dw, &px, &py, &di, &di, &du);
+    return mon_from_point(px, py);
+}
+
 int mon_at_win(Window w) {
     int wx2, wy2;
     unsigned int ww2, wh2;
     win_size(w, &wx2, &wy2, &ww2, &wh2);
-
     int cx2 = wx2 + (int)ww2 / 2;
     int cy2 = wy2 + (int)wh2 / 2;
-
-    int n;
-    XineramaScreenInfo *info = XineramaQueryScreens(d, &n);
-    if (!info) return 0;
-
-    int mon = 0;
-    for (int i = 0; i < n && i < MAX_MONITORS; i++) {
-        if (cx2 >= info[i].x_org && cx2 < info[i].x_org + info[i].width &&
-            cy2 >= info[i].y_org && cy2 < info[i].y_org + info[i].height) {
-            mon = i; break;
-        }
-    }
-    XFree(info);
-    return mon;
+    return mon_from_point(cx2, cy2);
 }
 
 void minimap_create(void) {
@@ -245,7 +232,7 @@ static void minimap_draw_one(Window panel, int mon, int mon_w, int mon_h, int mo
     int   any  = 0;
 
     for win {
-        if (c->monitor != mon) continue;
+        if (c->mon != mon) continue;
         any  = 1;
         minx = MIN(minx, c->cx);
         miny = MIN(miny, c->cy);
@@ -276,7 +263,7 @@ static void minimap_draw_one(Window panel, int mon, int mon_w, int mon_h, int mo
                     MAX(1, (int)((vy1 - vy0) * scale)));
 
     for win {
-        if (c->monitor != mon) continue;
+        if (c->mon != mon) continue;
 
       	int rx = MM_X(c->cx);
         int ry = MM_Y(c->cy);
@@ -288,16 +275,17 @@ static void minimap_draw_one(Window panel, int mon, int mon_w, int mon_h, int mo
         XFillRectangle(d, buf, minimap_gc,
                         MM_X(c->cx), MM_Y(c->cy), rw, rh);
 
-	char *buf = client_get_title(c->w);;
-        if (!buf) buf = "";
+	char *title = client_get_title(c->w);
+        if (!title) title = "";
 
 	XGlyphInfo ext;
-	XftTextExtentsUtf8(d, mm_font, (FcChar8 *)buf, strlen(buf), &ext);
+	XftTextExtentsUtf8(d, mm_font, (FcChar8 *)title, strlen(title), &ext);
 	int bx = rx + rw / 2, by = ry + ext.height + 5;
 	int x = bx - ext.xOff / 2;
 
 	XSetForeground(d, minimap_gc, 0x000000);
-	XftDrawStringUtf8(mm_draw, &mm_color, mm_font, x, by, (FcChar8 *)buf, strlen(buf));
+	XftDrawStringUtf8(mm_draw, &mm_color, mm_font, x, by, (FcChar8 *)title, strlen(title));
+	free(title);
     }
 
 #undef MM_X
@@ -337,10 +325,6 @@ static void always_ot() {
 
     for (int i = 0; i < MAX_MONITORS; i++)
         if (minimap_win[i]) XRaiseWindow(d, minimap_win[i]);
-
-    if (cur)
-	printf("Client H-%d, W-%d\n", cur->height, cur->width);
-
 }
 
 void toggle_minimap(const Arg arg) {
@@ -377,6 +361,11 @@ static void hud_create(void) {
 void hud_update(void) {
     if (!hud_win) return;
 
+    static XftFont *hud_font = NULL;
+    if (!hud_font)
+        hud_font = XftFontOpenName(d, DefaultScreen(d),
+            "Terminus:style=Regular:pixelsize=16:antialias=false:autohint=false");
+
     int   mon = mon_at_ptr();
     float px  = canvas.pan_x[mon];
     float py  = canvas.pan_y[mon];
@@ -401,28 +390,25 @@ void hud_update(void) {
 
     XftDraw *draw = XftDrawCreate(d, hud_win, visual, cmap);
 
-    XftFont *font = XftFontOpenName( d, DefaultScreen(d), "Terminus:style=Regular:pixelsize=16:antialias=false:autohint=false" );
-
-    if (font) {
+    if (hud_font) {
 	XRenderColor xr = { .red   = 65535, .green = 65535, .blue  = 65535, .alpha = 65535 };
 	
 	XftColor color;
 	XftColorAllocValue(d, visual, cmap, &xr, &color);
 	
 	XGlyphInfo ext;
-	XftTextExtentsUtf8( d, font, (FcChar8 *)hud_text, strlen(hud_text), &ext);
+	XftTextExtentsUtf8( d, hud_font, (FcChar8 *)hud_text, strlen(hud_text), &ext);
 	
 	unsigned int hw, hh;
 	int hx, hy;
 	win_size(hud_win, &hx, &hy, &hw, &hh);
 	
 	int x = ((int)hw - ext.xOff) / 2;
-	int y = (hh + font->ascent) / 2.2;
+	int y = (hh + hud_font->ascent) / 2.2;
 	
-	XftDrawStringUtf8(draw, &color, font, x, y, (FcChar8 *)hud_text, strlen(hud_text));
+	XftDrawStringUtf8(draw, &color, hud_font, x, y, (FcChar8 *)hud_text, strlen(hud_text));
 	
 	XftColorFree(d, visual, cmap, &color);
-	XftFontClose(d, font);
     }
     XftDrawDestroy(draw);
     XFlush(d);
@@ -436,8 +422,6 @@ Window titlebar_create(client *c)
     win_size(c->w, &x, &y, &w, &h);
 
     XSetWindowAttributes attr = {
-	// .override_redirect = True,
-	.background_pixel = 0x222222,
 	.border_pixel = 0,
 	.event_mask = ExposureMask | ButtonPressMask | ButtonReleaseMask | PointerMotionMask
     };
@@ -456,6 +440,55 @@ void titlebar_del (client *c) {
 	XDestroyWindow(d, c->titlebar);
 	c->titlebar = 0;
     }
+}
+
+Window border_create(client *c) {
+    int x, y;
+    unsigned int w, h;
+
+    win_size(c->w, &x, &y, &w, &h);
+
+    XSetWindowAttributes attr = {
+	.border_pixel = 0,
+	.event_mask = ExposureMask | ButtonPressMask | ButtonReleaseMask | PointerMotionMask
+    };
+
+    Window border = XCreateWindow(d, root, x - BORDER_W, y - TITLEBAR_HEIGHT - BORDER_W, w + BORDER_W * 2, h + TITLEBAR_HEIGHT + BORDER_W * 2, 0, CopyFromParent, InputOutput, CopyFromParent, CWOverrideRedirect | CWBackPixel | CWBorderPixel | CWEventMask, &attr);
+
+    XMapWindow(d, border);
+
+    return border;
+}
+
+void border_draw(client *c) {
+    if (!c || !c->border) return;
+
+    unsigned int tw, th;
+    int tx, ty;
+    win_size(c->w, &tx, &ty, &tw, &th);
+    
+    unsigned int bdr_w = tw + (unsigned int)BORDER_W * 2;
+    unsigned int bdr_h = th + (unsigned int)TITLEBAR_HEIGHT + (unsigned int)BORDER_W * 2;
+
+    Pixmap tpix = XCreatePixmap(d, root, bdr_w, bdr_h, DefaultDepth(d, DefaultScreen(d)));
+    GC     tgc  = XCreateGC(d, tpix, 0, NULL);
+    
+    unsigned long bg = (c == cur) ? 0x0038DA : 0x000000;
+    XSetForeground(d, tgc, bg);
+    XFillRectangle(d, tpix, tgc, 0, 0, bdr_w, bdr_h);
+    
+    XCopyArea(d, tpix, c->border, tgc, 0, 0, bdr_w, bdr_h, 0, 0);
+    XFreePixmap(d, tpix);
+    XFreeGC(d, tgc);
+    XFlush(d);
+}
+
+void border_del (client *c) {
+    if (!c || !c->border) return;
+    
+    XDestroyWindow(d, c->border);
+    c->border = 0;
+    XSync(d, False);
 }
 
 client *client_from_titlebar(Window w){
@@ -479,8 +512,26 @@ void client_move(client *c, int x, int y) {
 
     XMoveWindow(d, c->w, x, y);
 
-    if (c->titlebar)
-        XMoveWindow(d, c->titlebar, x, y - TITLEBAR_HEIGHT);
+    if (c->titlebar) {
+        XMoveWindow(d, c->titlebar, x - BORDER_W, y - TITLEBAR_HEIGHT);
+	titlebar_update(c);
+    }
+
+    if (c->border) {
+	XMoveWindow(d, c->border, x - BORDER_W, y - TITLEBAR_HEIGHT - BORDER_W);
+	border_draw(c);
+	
+	XWindowChanges wc = {
+	    .sibling = c->w,
+	    .stack_mode = Below
+	};
+	
+	XConfigureWindow(d, c->border,
+	                 CWSibling | CWStackMode,
+	                 &wc);
+    }
+
+    XSync(d, False);
 }
 
 void configure(client *c) {
@@ -516,6 +567,10 @@ void resizeclient(client *c, int w, int h) {
         XResizeWindow(d, c->titlebar, w, TITLEBAR_HEIGHT);
     }
 
+    if (c->border) {
+        XResizeWindow(d, c->border, w + BORDER_W * 2, h + TITLEBAR_HEIGHT + BORDER_W * 2);
+    }
+
     XSync(d, False);
 }
 
@@ -525,7 +580,13 @@ void client_resize(client *c, unsigned int w, unsigned int h) {
     if (applysizehints(c, &nw, &nh))
         resizeclient(c, nw, nh);
     minimap_update();
-    titlebar_draw(c);
+
+    if (c->titlebar)	
+	titlebar_update(c);
+
+    if (c->border)	
+	border_draw(c);
+    
 }
 
 void updatesizehints(client *c) {
@@ -626,39 +687,84 @@ char *client_get_title(Window w)
 }
 
 void titlebar_draw(client *c) {
-    if (!c || !c->titlebar)
-        return;
-
-    char buf[256];
-
-    snprintf(buf, sizeof(buf), "%s", client_get_title(c->w));
-
-    XClearWindow(d, c->titlebar);
-
-    Visual   *visual = DefaultVisual(d, DefaultScreen(d));
-    Colormap  cmap   = DefaultColormap(d, DefaultScreen(d));
-
-    XftDraw *draw = XftDrawCreate(d, c->titlebar, visual, cmap);
-
-    XftFont *font = XftFontOpenName( d, DefaultScreen(d), "Terminus:style=Regular:pixelsize=16:antialias=false:autohint=false" );
-
-    if (font) {
-	XRenderColor xr = { .red   = 65535, .green = 65535, .blue  = 65535, .alpha = 65535 };
+    static ButtonTb btc;
+    if (!c || !c->titlebar) return;
+	unsigned int tw, th;
+	int tx, ty;
+	win_size(c->titlebar, &tx, &ty, &tw, &th);
 	
-	XftColor color;
-	XftColorAllocValue(d, visual, cmap, &xr, &color);
+	Visual   *visual = DefaultVisual(d, DefaultScreen(d));
+	Colormap  cmap   = DefaultColormap(d, DefaultScreen(d));
 	
-	XGlyphInfo ext;
-	XftTextExtentsUtf8( d, font, (FcChar8 *)buf, strlen(buf), &ext);
+	Pixmap tpix = XCreatePixmap(d, root, tw, th, DefaultDepth(d, DefaultScreen(d)));
+	GC     tgc  = XCreateGC(d, tpix, 0, NULL);
 	
-	XftDrawStringUtf8(draw, &color, font, 10,(TITLEBAR_HEIGHT / 2) + (ext.height / 2), (FcChar8 *)buf, strlen(buf));
+	unsigned long bg = (c == cur) ? 0x0038DA : 0x000000;
+	XSetForeground(d, tgc, bg);
+	XFillRectangle(d, tpix, tgc, -BORDER, 0, tw + BORDER , th);
 	
-	XftColorFree(d, visual, cmap, &color);
-	XftFontClose(d, font);
+	btc.w = 22;
+	btc.h = (int)th;
+	btc.x = (int)tw - btc.w - 4;
+	btc.y = 0;
+	
+	XFillRectangle(d, tpix, tgc, btc.x, btc.y, btc.w, btc.h);
+	
+	XftFont *btn_font = XftFontOpenName(d, DefaultScreen(d),
+	    "FiraMonoNerdFont:style=Regular:pixelsize=20:antialias=false");
+	
+	if (btn_font) {
+	    XftDraw *btn_draw = XftDrawCreate(d, tpix, visual, cmap);
+	    XftColor btn_color;
+	    XRenderColor btn_xr = { .red = 65535, .green = 65535, .blue = 65535, .alpha = 65535 };
+	    XftColorAllocValue(d, visual, cmap, &btn_xr, &btn_color);
+	    
+	    const FcChar8 *x_symbol = (FcChar8 *)"";
+	    XGlyphInfo ext;
+	    XftTextExtentsUtf8(d, btn_font, x_symbol, strlen((char *)x_symbol), &ext);
+	    
+	    int sx = btc.x + (btc.w - ext.xOff) / 2;
+	    int sy = (btc.h + btn_font->ascent) / 2 - 2;
+	    
+	    XftDrawStringUtf8(btn_draw, &btn_color, btn_font, sx, sy,
+	        (FcChar8 *)x_symbol, strlen((char *)x_symbol));
+	    
+	    XftColorFree(d, visual, cmap, &btn_color);
+	    XftFontClose(d, btn_font);
+	    XftDrawDestroy(btn_draw);
     }
-
+    
+    char buf[256];
+    char *win_title = client_get_title(c->w);
+    snprintf(buf, sizeof(buf), "%s", win_title ? win_title : "");
+    free(win_title);
+    
+    XftDraw *draw = XftDrawCreate(d, tpix, visual, cmap);
+    XftFont *font = XftFontOpenName(d, DefaultScreen(d),
+        "Terminus:style=Regular:pixelsize=16:antialias=false:autohint=false");
+    
+    if (font) {
+        XRenderColor xr = { .red = 65535, .green = 65535, .blue = 65535, .alpha = 65535 };
+        XftColor color;
+        XftColorAllocValue(d, visual, cmap, &xr, &color);
+    
+        XftDrawStringUtf8(draw, &color, font, 10, (th / 2) + (font->ascent / 2),
+            (FcChar8 *)buf, strlen(buf));
+    
+        XftColorFree(d, visual, cmap, &color);
+        XftFontClose(d, font);
+    }
+    
     XftDrawDestroy(draw);
+    XCopyArea(d, tpix, c->titlebar, tgc, 0, 0, tw, th, 0, 0);
+    XFreePixmap(d, tpix);
+    XFreeGC(d, tgc);
     XFlush(d);
+}
+
+void titlebar_update(client *c) {
+    if (c && c->titlebar)
+        titlebar_draw(c);
 }
 
 static void canvas_sync_to_root(void) {
@@ -677,19 +783,25 @@ static void canvas_sync_to_root(void) {
 }
 
 void canvas_apply_all(void) {
-    for win {
-        int   m  = c->monitor;
-        float px = canvas.pan_x[m];
-        float py = canvas.pan_y[m];
-        client_move(c,
-                    canvas_to_screen(c->cx, px),
-                    canvas_to_screen(c->cy, py));
-	titlebar_draw(c);
+	if (!cur) return;
+	for win {
+	    int   m  = c->mon;
+	    float px = canvas.pan_x[m];
+	    float py = canvas.pan_y[m];
+
+	    if (m == cur->mon && !c->f && !cur->f) {
+		client_move(c,
+			    canvas_to_screen(c->cx, px),
+			    canvas_to_screen(c->cy, py));
+		if (c->titlebar) titlebar_update(c);
+		
+	    }
     }
+
     XFlush(d);
     hud_update();
     minimap_update();
-    titlebar_draw(cur);
+    titlebar_update(cur);
     canvas_sync_to_root();
 }
 
@@ -719,13 +831,20 @@ void canvas_reset(const Arg arg) {
 }
 
 void win_focus(client *c) {
+    client *prev = cur;
     cur = c;
     XSetInputFocus(d, cur->w, RevertToParent, CurrentTime);
     XChangeProperty(d, root,
                     XInternAtom(d, "_NET_ACTIVE_WINDOW", False),
                     XA_WINDOW, 32, PropModeReplace,
                     (unsigned char *)&cur->w, 1);
-    // if (cur->titlebar) XRaiseWindow(d, cur->titlebar);
+    if (prev && prev != cur) {
+	titlebar_draw(prev);
+	border_draw(prev);
+    }
+
+    titlebar_draw(cur);
+    border_draw(cur);
 }
 
 void titlebar_focus(Window w) {
@@ -734,9 +853,9 @@ void titlebar_focus(Window w) {
 }
 
 void canvas_focus(client *c) {
-    if (!c) return;
+    if (!c || (cur && cur->f) || c->f) return;
 
-    int m = c->monitor;
+    int m = c->mon;
 
     int n;
     XineramaScreenInfo *info = XineramaQueryScreens(d, &n);
@@ -751,6 +870,7 @@ void canvas_focus(client *c) {
     }
     XFree(info);
 
+
     unsigned int cw, ch;
     win_size(c->w, &(int){0}, &(int){0}, &cw, &ch);
 
@@ -763,23 +883,74 @@ void canvas_focus(client *c) {
     canvas_apply_all();
 
     XRaiseWindow(d, c->w);
+    if (c->titlebar) XRaiseWindow(d, c->titlebar);
+
+    if (c->border) {
+	XWindowChanges wc = {
+	    .sibling = c->w,
+	    .stack_mode = Below
+        };
+
+	XConfigureWindow(d, c->border, CWSibling | CWStackMode, &wc);
+    }
+
     win_focus(c);
-    titlebar_focus(c->titlebar);
+    titlebar_update(cur);
+    border_draw(c);
 }
 
 void win_prev(const Arg arg) {
-    if (cur) canvas_focus(cur->prev);
-    if (cur->titlebar) XRaiseWindow(d, cur->titlebar);
+    if (!cur || !list) return;
+
+    int m = cur->mon;
+    if (cur->f) return;
+
+    client *c = cur->prev;
+    if (!c) return;
+
+    int checked = 0;
+    int total = 0;
+    for (client *t = list; t->prev != list; t = t->prev) total++;
+    total++;
+
+    while (c != cur && checked < total) {
+        if (c->mon == m) break;
+        c = c->prev ? c->prev : list;
+        checked++;
+    }
+
+    if (c && c != cur && c->mon == m)
+        canvas_focus(c);
 }
 
 void win_next(const Arg arg) { 
-    if (cur) canvas_focus(cur->next);
-    if (cur->titlebar) XRaiseWindow(d, cur->titlebar);
+    if (!cur || !list) return;
+
+    int m = cur->mon;
+    if (cur->f) return;
+
+    client *c = cur->next;
+    if (!c) return;
+
+    int checked = 0;
+    int total = 0;
+    for (client *t = list; t->next != list; t = t->next) total++;
+    total++;
+
+    while (c != cur && checked < total) {
+        if (c->mon == m) break;
+        c = c->next ? c->next : list;
+        checked++;
+    }
+
+    if (c && c != cur && c->mon == m)
+        canvas_focus(c);
 }
 
 void notify_destroy(XEvent *e) {
     win_del(e->xdestroywindow.window);
     minimap_update();
+    titlebar_update(cur);
 
     if (list)
         win_focus(list->prev);
@@ -811,9 +982,10 @@ void notify_enter(XEvent *e) {
     for win
         if (c->w == e->xcrossing.window) {
             win_focus(c);
-	    titlebar_draw(c);
+	    if (c->titlebar) titlebar_update(c);
     }
     minimap_update();
+    titlebar_update(cur);
 }
 
 void notify_property(XEvent *e) {
@@ -822,19 +994,9 @@ void notify_property(XEvent *e) {
     for win {
         if (c->w == ev->window) {
 
-            Atom visible =
-                XInternAtom(d,
-                    "_NET_WM_VISIBLE_NAME",
-                    False);
-
-            Atom name =
-                XInternAtom(d,
-                    "_NET_WM_NAME",
-                    False);
-
-            if (ev->atom == XA_WM_NAME || ev->atom == visible || ev->atom == name)
+            if (ev->atom == XA_WM_NAME || ev->atom == net_wm_visible_name || ev->atom == net_wm_name)
             {
-                titlebar_draw(c);
+		titlebar_update(c);
             } else if (ev->atom == XA_WM_NORMAL_HINTS) {
                 updatesizehints(c);
             }
@@ -856,36 +1018,38 @@ void notify_motion(XEvent *e) {
         return;
     }
 
-    if (!mouse.subwindow || (cur && cur->f))
+    if (!cur || !mouse.subwindow || cur->f)
         return;
 
     int xd = e->xbutton.x_root - mouse.x_root;
     int yd = e->xbutton.y_root - mouse.y_root;
-
+    
     if (mouse.button == 1) {
         int new_sx = wx + xd;
         int new_sy = wy + yd;
         client_move(cur, new_sx, new_sy);
-	if (cur->titlebar) XRaiseWindow(d, cur->titlebar);
-	minimap_update();
-	titlebar_draw(cur);
+        if (cur->titlebar) XRaiseWindow(d, cur->titlebar);
+        minimap_update();
+        titlebar_update(cur);
+        border_draw(cur);
         if (cur) {
-            cur->monitor = mon_at_win(cur->w);
-            int   m = cur->monitor;
-            cur->cx = (float)new_sx + canvas.pan_x[m];
-            cur->cy = (float)new_sy + canvas.pan_y[m];
-        }
+	    cur->mon = mon_at_win(cur->w);
+	    int   m = cur->mon;
+	    cur->cx = (float)new_sx + canvas.pan_x[m];
+	    cur->cy = (float)new_sy + canvas.pan_y[m];
+	}
     } else if (mouse.button == 3) {
         client_resize(cur, MAX(1, ww + xd), MAX(1, wh + yd));
     }
 }
+
 void key_press(XEvent *e) { KeySym keysym = XkbKeycodeToKeysym(d, e->xkey.keycode, 0, 0); for (unsigned int i = 0; i < sizeof(keys) / sizeof(*keys); ++i) if (keys[i].keysym == keysym &&
             mod_clean(keys[i].mod) == mod_clean(e->xkey.state))
             keys[i].function(keys[i].arg);
 }
 
 void button_press(XEvent *e) {
-    if (cur && cur->f)
+    if (!cur || cur->f)
 	return;
 
     if (e->xbutton.button == 2) {
@@ -898,6 +1062,28 @@ void button_press(XEvent *e) {
         return;
     }
 
+    if (is_titlebar(e->xbutton.window) && !(e->xbutton.state & MOD)) {
+	client *c = client_from_titlebar(e->xbutton.window);
+	if (!c) return;
+	
+	unsigned int tw, th;
+	int tx, ty;
+	win_size(c->titlebar, &tx, &ty, &tw, &th);
+	int btn_x = (int)tw - 20;
+	if (e->xbutton.button == Button1 && e->xbutton.x >= btn_x) {
+	    win_kill((Arg){0});
+	    return;
+	}
+	
+	win_focus(c);
+	win_size(c->w, &wx, &wy, &ww, &wh);
+	mouse = e->xbutton;
+	mouse.subwindow = c->w;
+	XRaiseWindow(d, c->w);
+	XRaiseWindow(d, c->titlebar);
+	return;
+    }
+
     if (!e->xbutton.subwindow) return;
     win_size(e->xbutton.subwindow, &wx, &wy, &ww, &wh);
     XRaiseWindow(d, e->xbutton.subwindow);
@@ -905,11 +1091,27 @@ void button_press(XEvent *e) {
     if (cur->titlebar) XRaiseWindow(d, cur->titlebar);
     mouse = e->xbutton;
 
-    if (TITLEBAR == 1){
+    if (is_titlebar(e->xbutton.window) && !(e->xbutton.state & MOD)) {
 	client *c = client_from_titlebar(e->xbutton.subwindow);
 
 	if (c) {
+	    unsigned int tw, th;
+	    int tx, ty;
+	    win_size(c->titlebar, &tx, &ty, &tw, &th);
+
+	    int btn_w = 16;
+	    int btn_x = (int)tw - btn_w - 4;
+	    int click_x = e->xbutton.x;
+	    
+	    if (e->xbutton.button == Button1 && click_x >= btn_x) {
+	        win_kill((Arg){0});
+	        return;
+	    }
+
 	    win_focus(c);
+	    if (!c->f)
+		canvas_focus(c);
+
 	    mouse = e->xbutton;
 
 	    win_size(c->w, &wx, &wy, &ww, &wh);
@@ -931,12 +1133,12 @@ void win_add(Window w) {
     if (!(c = (client *)calloc(1, sizeof(client)))) exit(1);
 
     c->w       = w;
-    c->monitor = mon_at_win(w);
+    c->mon = mon_at_win(w);
 
     int sx = 0, sy = 0;
     unsigned int dw2, dh2;
     win_size(w, &sx, &sy, &dw2, &dh2);
-    int   m = c->monitor;
+    int   m = c->mon;
     c->cx = (float)sx + canvas.pan_x[m];
     c->cy = (float)sy + canvas.pan_y[m];
 
@@ -948,8 +1150,21 @@ void win_add(Window w) {
 
     if (TITLEBAR){
 	c->titlebar = titlebar_create(c);
+	titlebar_update(c);
+    }
 
-	titlebar_draw(c);
+    if (BORDER){
+	c->border = border_create(c);
+	border_draw(c);
+    }
+
+    if (c->border) {
+	XWindowChanges wc = {
+	    .sibling = c->w,
+	    .stack_mode = Below
+	};
+
+	XConfigureWindow(d, c->border, CWSibling | CWStackMode, &wc);
     }
 
     if (list) {
@@ -967,8 +1182,8 @@ void win_del(Window w) {
     client *x = NULL;
     for win if (c->w == w) x = c;
     if (!list || !x) return;
-    if (x->titlebar)titlebar_del(x);
-    // titlebar_del(x);
+    if (x->titlebar) titlebar_del(x);
+    if (x->border) border_del(x);
     if (x->prev == x) list = NULL;
     if (list == x)    list = x->next;
     if (x->next) x->next->prev = x->prev;
@@ -1013,27 +1228,30 @@ void win_center(const Arg arg) {
     XineramaScreenInfo *info = XineramaQueryScreens(d, &n);
     int mx = 0, my = 0, mw = sw, mh = sh;
     if (info) {
-        for (int i = 0; i < n; i++) {
-            if (px_ptr >= info[i].x_org &&
-                px_ptr <  info[i].x_org + info[i].width &&
-                py_ptr >= info[i].y_org &&
-                py_ptr <  info[i].y_org + info[i].height) {
-                mx = info[i].x_org; my = info[i].y_org;
-                mw = info[i].width; mh = info[i].height;
-                break;
-            }
+        int m = mon_from_point(px_ptr, py_ptr);
+        if (m < n) {
+            mx = info[m].x_org; my = info[m].y_org;
+            mw = info[m].width; mh = info[m].height;
         }
         XFree(info);
     }
 
-    int sx = mx + (mw - (int)ww) / 2;
-    int sy = my + (mh - (int)wh) / 2;
+    int total_w = (int)ww + BORDER_W * 2;
+    int total_h = (int)wh + TITLEBAR_HEIGHT + BORDER_W;
+
+    int border_x = mx + (mw - total_w) / 2;
+    int border_y = my + (mh - total_h) / 2;
+
+    int sx = border_x + BORDER_W;
+    int sy = border_y + TITLEBAR_HEIGHT;
+
     client_move(cur, sx, sy);
 
-    cur->monitor = mon_at_win(cur->w);
-    int   m = cur->monitor;
+    cur->mon = mon_at_win(cur->w);
+    int   m = cur->mon;
     cur->cx = (float)sx + canvas.pan_x[m];
     cur->cy = (float)sy + canvas.pan_y[m];
+    minimap_update(); 
 }
 
 void win_fs(const Arg arg) {
@@ -1050,15 +1268,10 @@ void win_fs(const Arg arg) {
     XineramaScreenInfo *info = XineramaQueryScreens(d, &n);
     int mx = 0, my = 0, mw = sw, mh = sh;
     if (info) {
-        for (int i = 0; i < n; i++) {
-            if (px_ptr >= info[i].x_org &&
-                px_ptr <  info[i].x_org + info[i].width &&
-                py_ptr >= info[i].y_org &&
-                py_ptr <  info[i].y_org + info[i].height) {
-                mx = info[i].x_org; my = info[i].y_org;
-                mw = info[i].width; mh = info[i].height;
-                break;
-            }
+        int m = mon_from_point(px_ptr, py_ptr);
+        if (m < n) {
+            mx = info[m].x_org; my = info[m].y_org;
+            mw = info[m].width; mh = info[m].height;
         }
         XFree(info);
     }
@@ -1078,20 +1291,16 @@ void win_fs(const Arg arg) {
 
 	hud_update();
 	minimap_update();
-        titlebar_draw(cur);
+	titlebar_update(cur);
         if (!TITLEBAR) XUnmapWindow(d, cur->titlebar);
     } else {
-        // XMoveResizeWindow(d, cur->w, cur->wx, cur->wy, cur->ww, cur->wh);
 	resizeclient(cur, cur->ww, cur->wh);
 	client_move(cur, cur->wx, cur->wy);
 	minimap_update();
-        titlebar_draw(cur);
+	titlebar_update(cur);
         if (cur->titlebar) {
-            // XMoveResizeWindow(d, cur->titlebar, cur->wx, cur->wy - TITLEBAR_HEIGHT, cur->ww, TITLEBAR_HEIGHT);
-	    resizeclient(cur, cur->ww, cur->wh);
-	    client_move(cur, cur->wx, cur->wy);
             XMapWindow(d, cur->titlebar);
-            titlebar_draw(cur);
+	    titlebar_update(cur);
         }
     }
 }
@@ -1131,11 +1340,11 @@ void configure_request(XEvent *e) {
         for (; c2 && t2 != list->prev; t2 = c2, c2 = c2->next) {
             if (c2->w == ev->window) {
                 target = c2;
-                int m = c2->monitor;
+                int m = c2->mon;
 		sx = canvas_to_screen(c2->cx, canvas.pan_x[m]);
 		sy = canvas_to_screen(c2->cy, canvas.pan_y[m]);
                 mask = (mask & ~(CWX | CWY)) | CWX | CWY;
-		titlebar_draw(t2);
+		titlebar_update(t2);
                 break;
             }
         }
@@ -1149,9 +1358,14 @@ void configure_request(XEvent *e) {
 
     if (target && target->titlebar) {
         XMoveResizeWindow(d, target->titlebar, sx, sy - TITLEBAR_HEIGHT, ev->width, TITLEBAR_HEIGHT);
-	titlebar_draw(target);
+	titlebar_update(target);
     }
 
+    if (target && target->border) {
+        XMoveResizeWindow(d, target->border, sx - BORDER_W, sy - TITLEBAR_HEIGHT, 
+                          ev->width + BORDER_W * 2, ev->height + TITLEBAR_HEIGHT + BORDER_W * 2);
+        border_draw(target);
+    }
 }
 
 static int win_is_dock(Window w) {
@@ -1211,21 +1425,27 @@ void map_request(XEvent *e) {
     win_size(w, &wx, &wy, &ww, &wh);
     win_add(w);
     minimap_update();
-    titlebar_draw(cur);
-    cur = list->prev;
+    titlebar_update(cur);
+    border_draw(cur);
 
-   if (wx + wy == 0) win_center((Arg){0});
-   {
+    client *oc = cur;
+
+    cur = list->prev;
+    
+    if (wx + wy == 0) win_center((Arg){0});
+    {
        int sx = 0, sy = 0;
        unsigned int dw2, dh2;
        win_size(w, &sx, &sy, &dw2, &dh2);
-       cur->monitor = mon_at_win(w);
-       int   m = cur->monitor;
+       cur->mon = mon_at_win(w);
+       int   m = cur->mon;
        cur->cx = (float)sx + canvas.pan_x[m];
        cur->cy = (float)sy + canvas.pan_y[m];
    }
 
     XMapWindow(d, w);
+
+    cur = oc;
     win_focus(list->prev);
 }
 
@@ -1283,19 +1503,13 @@ void ws_focusnext(const Arg arg) {
     XineramaScreenInfo *info = XineramaQueryScreens(d, &n);
     if (!info || n < 2) { XFree(info); return; }
 
-    int cur_mon = 0;
-    for (int i = 0; i < n; i++) {
-        if (px >= info[i].x_org && px < info[i].x_org + info[i].width &&
-            py >= info[i].y_org && py < info[i].y_org + info[i].height) {
-            cur_mon = i; break;
-        }
-    }
+    int cur_mon = mon_from_point(px, py);
     int next = (cur_mon + 1) % n;
     XWarpPointer(d, None, root, 0, 0, 0, 0,
                  info[next].x_org + info[next].width  / 2,
                  info[next].y_org + info[next].height / 2);
     minimap_update();
-    titlebar_draw(cur);
+    titlebar_update(cur);
     XFree(info);
     XFlush(d);
 }
@@ -1310,14 +1524,7 @@ void move_nextmon(const Arg arg) {
     XineramaScreenInfo *info = XineramaQueryScreens(d, &n);
     if (!info || n < 2) { XFree(info); return; }
 
-    int cur_mon = -1;
-    for (int i = 0; i < n; i++) {
-        if (px_ptr >= info[i].x_org && px_ptr < info[i].x_org + info[i].width &&
-            py_ptr >= info[i].y_org && py_ptr < info[i].y_org + info[i].height) {
-            cur_mon = i; break;
-        }
-    }
-    if (cur_mon == -1) { XFree(info); return; }
+    int cur_mon = mon_from_point(px_ptr, py_ptr);
 
     int next = (cur_mon + 1) % n;
     XWarpPointer(d, None, root, 0, 0, 0, 0,
@@ -1333,8 +1540,8 @@ void move_nextmon(const Arg arg) {
         int new_sy = info[next].y_org + (info[next].height - (int)ch) / 2;
         client_move(cur, new_sx, new_sy);
 	minimap_update();
-	titlebar_draw(cur);
-        cur->monitor = next;
+	titlebar_update(cur);
+        cur->mon = next;
         cur->cx = (float)new_sx + canvas.pan_x[next];
         cur->cy = (float)new_sy + canvas.pan_y[next];
     }
@@ -1358,6 +1565,7 @@ int main(void) {
 
     net_supporting_wm_check  = XInternAtom(d, "_NET_SUPPORTING_WM_CHECK",  False);
     net_wm_name              = XInternAtom(d, "_NET_WM_NAME",              False);
+    net_wm_visible_name      = XInternAtom(d, "_NET_WM_VISIBLE_NAME",      False);
     ewmh_utf8_string         = XInternAtom(d, "UTF8_STRING",               False);
     net_supported            = XInternAtom(d, "_NET_SUPPORTED",            False);
     net_wm_window_type       = XInternAtom(d, "_NET_WM_WINDOW_TYPE",       False);
@@ -1415,7 +1623,7 @@ int main(void) {
 	}
     }
 
-    while (1 && !XNextEvent(d, &ev)) {
+    while (!XNextEvent(d, &ev)) {
         if ((ev.type == MapNotify || ev.type == ConfigureNotify) && hud_win)
             XRaiseWindow(d, hud_win);
         if (events[ev.type])
@@ -1424,7 +1632,5 @@ int main(void) {
 	    always_ot();
 	    hud_update();
 	}
-	else
-	    printf("No HUD");
     }
 }

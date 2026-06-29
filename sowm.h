@@ -42,9 +42,10 @@ struct key {
 
 typedef struct client {
   struct client *next, *prev;
-  Window titlebar;
   Window w;
-  int monitor;
+  Window titlebar;
+  Window border;
+  int mon;
   int f;
   int wx, wy;
   int mx, my;
@@ -61,7 +62,6 @@ typedef struct client {
 typedef struct {
   float pan_x[MAX_MONITORS];
   float pan_y[MAX_MONITORS];
-  float zoom;
 } canvas_state;
 
 typedef struct {
@@ -69,6 +69,11 @@ typedef struct {
     int tx, ty;
     int active;
 } MinimapState;
+
+typedef struct {
+    int w, h;
+    int x, y;
+} ButtonTb;
 
 char *copystr(const char *s);
 void button_press(XEvent *e);
@@ -99,7 +104,6 @@ void ws_focusnext(const Arg arg);
 
 void canvas_pan(int mon, float dx, float dy);
 void canvas_pan_key(const Arg arg);
-void canvas_zoom_key(const Arg arg);
 void canvas_reset(const Arg arg);
 static void canvas_sync_to_root(void);
 void canvas_apply_all(void);
@@ -112,6 +116,7 @@ static void minimap_init(Display *dpy);
 static void minimap_draw_one(Window panel, int mon, int mon_w, int mon_h, int mon_x, int mon_y);
 static long now_ms(void);
 void minimap_update(void);
+void titlebar_update(client *c);
 static void always_ot();
 void toggle_minimap(const Arg arg);
 void minimap_tick(void);
@@ -120,6 +125,9 @@ void titlebar_draw(client *c);
 void titlebar_del(client *c);
 client *client_from_titlebar(Window w);
 int is_titlebar(Window w);
+Window border_create(client *c);
+void border_draw(client *c);
+void border_del (client *c);
 void client_move(client *c, int x, int y);
 void updatesizehints(client *c);
 void resizeclient(client *c, int w, int h);
